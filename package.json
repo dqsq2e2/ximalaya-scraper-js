@@ -1,0 +1,20 @@
+{
+  "name": "ximalaya-scraper-js",
+  "version": "1.0.0",
+  "description": "喜马拉雅刮削插件 (JavaScript 版本) - 使用 axios 绕过反爬虫检测",
+  "main": "plugin.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "ximalaya",
+    "scraper",
+    "audiobook",
+    "ting-reader"
+  ],
+  "author": "Ting Reader Team",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0"
+  }
+}

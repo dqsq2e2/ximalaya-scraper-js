@@ -1,0 +1,27 @@
+{
+  "name": "ximalaya-scraper-js",
+  "version": "1.0.0",
+  "plugin_type": "scraper",
+  "runtime": "javascript",
+  "entry_point": "plugin.js",
+  "author": "Ting Reader Team",
+  "description": "喜马拉雅刮削插件",
+  "license": "MIT",
+  "npm_dependencies": [
+    {
+      "name": "axios",
+      "version": "^1.6.0"
+    }
+  ],
+  "dependencies": [],
+  "permissions": [
+    {
+      "type": "network_access",
+      "value": "*.ximalaya.com"
+    },
+    {
+      "type": "network_access",
+      "value": "*.xmcdn.com"
+    }
+  ]
+}
