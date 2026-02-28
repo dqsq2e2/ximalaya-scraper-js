@@ -1,0 +1,69 @@
+name: Release Plugin
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "package.json"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      tag_exists: ${{ steps.check_tag.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Get Version
+        id: get_version
+        run: |
+          VERSION=$(grep '"version":' package.json | head -n 1 | cut -d '"' -f 4)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Detected version: $VERSION"
+
+      - name: Check if Tag Exists
+        id: check_tag
+        uses: mukunku/tag-exists-action@v1.6.0
+        with: 
+          tag: "v${{ steps.get_version.outputs.version }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-and-release:
+    needs: check-version
+    if: needs.check-version.outputs.tag_exists == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare Release Artifacts
+        run: |
+          mkdir -p release
+          cp -r package.json plugin.js plugin.json release/
+          
+          # Sync version to plugin.json
+          VERSION="${{ needs.check-version.outputs.version }}"
+          jq --arg ver "$VERSION" '.version = $ver' release/plugin.json > release/plugin.json.tmp && mv release/plugin.json.tmp release/plugin.json
+
+      - name: Package Release
+        run: |
+          cd release
+          zip -r ../ximalaya-scraper-js.zip *
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.check-version.outputs.version }}
+          name: Release v${{ needs.check-version.outputs.version }}
+          files: ximalaya-scraper-js.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
