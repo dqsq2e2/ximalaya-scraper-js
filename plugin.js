@@ -201,13 +201,18 @@ const WEB_HEADERS = {
  */
 async function getXmSign() {
     try {
-        const response = await fetchJson('https://www.ximalaya.com/revision/time', {
-            headers: WEB_HEADERS,
+        const response = await fetch('https://www.ximalaya.com/revision/time', {
+            headers: { ...WEB_HEADERS, 'Cache-Control': 'no-cache' },
             method: 'GET'
         });
-        const serverTime = response.data;
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const serverTime = await response.text();
         const now = Date.now();
-        const randomNum = Math.floor(Math.random() * 100);
+        const randomNum = Math.round(Math.random() * 100);
         const hash = md5(`himalaya-${serverTime}`);
         return `${hash}(${randomNum})${serverTime}(${randomNum})${now}`;
     } catch (e) {
@@ -588,7 +593,8 @@ async function search(args) {
                         title: TextCleaner.cleanBookTitle(doc.title),
                         author: '', // Search results only provide anchor, which is not the author
                         cover_url: TextCleaner.fixUrl(doc.cover_path),
-                        intro: doc.intro
+                        intro: doc.intro,
+                        chapter_count: doc.tracks || doc.track_count || doc.trackCount || 0
                     });
                 }
             } else {
@@ -635,7 +641,7 @@ async function search(args) {
                         // Add extra fields required by system
                         narrator: detail.narrator,
                         tags: detail.tags,
-                        chapter_count: detail.chapter_count
+                        chapter_count: detail.chapter_count > 0 ? detail.chapter_count : items[0].chapter_count
                     };
                     Ting.log.info(`第一条结果详情获取成功`);
                 } catch (e) {
@@ -664,149 +670,114 @@ async function getDetail(args) {
     Ting.log.info(`获取喜马拉雅书籍详情: ${bookId}`);
     
     return executeWithRetry(async () => {
+        let mobileResult = null;
+
+        // 1. Try Mobile API first (Better description)
+        const mobileUrl = 'https://mobile.ximalaya.com/mobile-album/album/plant/detail';
         try {
-            // 1. Try Mobile API first (Better description)
-            const mobileUrl = 'https://mobile.ximalaya.com/mobile-album/album/plant/detail';
-            try {
-                const mobileRes = await fetchJson(mobileUrl, {
-                    params: { albumId: bookId, identity: 'podcast' },
-                    headers: MOBILE_HEADERS
-                });
-                
-                if (mobileRes?.data?.data) {
-                    const d = mobileRes.data.data;
-                    
-                    // Handle new Mobile API structure (baseAlbum, anchor, intro, resourceBit)
-                    const base = d.baseAlbum || d.albumInfo || d.mainInfo || d.album || {};
-                    const anchor = d.anchor || {};
-                    const introData = d.intro || {};
-                    
-                    const richIntro = introData.richIntro || introData.intro || base.intro || '';
-                    
-                    let intro = TextCleaner.cleanDescription(richIntro);
-                    let title = TextCleaner.cleanBookTitle(base.title || base.albumTitle || '');
-                    
-                    let narrator = anchor.nickname || base.nickname || base.anchorName || '';
-                    let author = '';
-
-                    // Try to find "author" or "original author" in creativeTeam
-                    if (d.resourceBit?.creativeTeam?.extraInfo?.creativeTeam) {
-                        try {
-                            const teamData = JSON.parse(d.resourceBit.creativeTeam.extraInfo.creativeTeam);
-                            if (teamData && teamData.creativeTeams) {
-                                const authorTeam = teamData.creativeTeams.find(m => 
-                                    m.role === '作者' || m.role === '原著' || m.role === '编剧'
-                                );
-                                if (authorTeam) {
-                                    author = authorTeam.nickName;
-                                }
-                                
-                                // If narrator is empty, try to find it here too
-                                if (!narrator) {
-                                    const anchorTeam = teamData.creativeTeams.find(m => m.role === '主播');
-                                    if (anchorTeam) {
-                                        narrator = anchorTeam.nickName;
-                                    }
-                                }
-                            }
-                        } catch (e) {
-                            Ting.log.warn('Failed to parse creativeTeam JSON: ' + e.message);
-                        }
-                    }
-
-                    // If author is still missing, try to extract from description
-                    if (!author || author === '未知作者') {
-                        const authorMatch = intro.match(/(?:作者|原著|编剧|作者\s*[:：\s]*|原著\s*[:：\s]*)\s*([^\n\s|【〔(（]+)/) ||
-                                            intro.match(/([^\n\s|【〔(（]+)\s*(?:著|编著)/);
-                        if (authorMatch) {
-                            author = authorMatch[1].trim();
-                        }
-                    }
-                    
-                    // Fallback: if we still don't have an author, use the narrator? 
-                    // No, user explicitly said author is NOT narrator. 
-                    // So we keep author empty if not found, or maybe '未知'.
-                    // But for compatibility with UI that might expect something, we'll leave it empty string if not found.
-
-                    // Parse tags properly
-                    let tags = [];
-                    if (base.tags) {
-                        if (typeof base.tags === 'string') {
-                            tags = base.tags.split(',').filter(t => t);
-                        } else if (Array.isArray(base.tags)) {
-                            tags = base.tags;
-                        }
-                    } else if (d.albumTags && Array.isArray(d.albumTags)) {
-                        // Sometimes tags are in albumTags array of objects
-                        tags = d.albumTags.map(t => t.tagName || t.name).filter(t => t);
-                    } else if (d.resourceBit?.albumIntro?.body && Array.isArray(d.resourceBit.albumIntro.body)) {
-                        // Sometimes tags are in resourceBit.albumIntro.body as text items
-                        tags = d.resourceBit.albumIntro.body
-                            .filter(item => item.bizType === 'text' && item.title)
-                            .map(item => item.title);
-                    }
-
-                    return {
-                        id: String(bookId),
-                        title: title,
-                        author: TextCleaner.cleanAuthor(author),
-                        narrator: narrator, 
-                        cover_url: TextCleaner.fixUrl(base.coverLarge || base.coverMiddle || base.coverSmall || base.coverPath || base.cover || base.albumCoverPath),
-                        intro: intro,
-                        tags: tags,
-                        chapter_count: base.trackCount || base.tracksInfo?.trackTotalCount || 0,
-                        duration: null
-                    };
-                }
-            } catch (e) {
-                Ting.log.warn(`Mobile API failed: ${e.message}, trying Web API...`);
-            }
-
-            // 2. Fallback to Web API
-            const url = `https://www.ximalaya.com/revision/album/v1/getAlbumDetail`;
-            const xmSign = await getXmSign();
-            const response = await fetchJson(url, {
-                params: { albumId: bookId, device: 'web' },
-                headers: { ...WEB_HEADERS, 'xm-sign': xmSign }
+            const mobileRes = await fetchJson(mobileUrl, {
+                params: { albumId: bookId, identity: 'podcast' },
+                headers: MOBILE_HEADERS
             });
             
-            const data = response.data;
-            
-            if (!data.data || !data.data.mainInfo) {
-                throw new Error('专辑不存在或无法访问');
-            }
-            
-            const mainInfo = data.data.mainInfo;
-            const rawTitle = mainInfo.albumTitle || '';
-            const desc = mainInfo.detailRichIntro || mainInfo.richIntro || mainInfo.intro || '';
-            
-            // Web API tags handling
-            let webTags = [];
-            if (mainInfo.tags) {
-                if (typeof mainInfo.tags === 'string') {
-                    webTags = mainInfo.tags.split(',').filter(t => t.trim());
-                } else if (Array.isArray(mainInfo.tags)) {
-                    // Check if it's array of strings or objects
-                    webTags = mainInfo.tags.map(t => typeof t === 'string' ? t : (t.tagName || t.name)).filter(t => t);
+            if (mobileRes?.data?.data) {
+                const d = mobileRes.data.data;
+                
+                // Handle new Mobile API structure (baseAlbum, anchor, intro, resourceBit)
+                const base = d.baseAlbum || d.albumInfo || d.mainInfo || d.album || {};
+                const anchor = d.anchor || {};
+                const introData = d.intro || {};
+                
+                const richIntro = introData.richIntro || introData.intro || base.intro || '';
+                
+                let intro = TextCleaner.cleanDescription(richIntro);
+                let title = TextCleaner.cleanBookTitle(base.title || base.albumTitle || '');
+                
+                let narrator = anchor.nickname || base.nickname || base.anchorName || '';
+                let author = '';
+
+                // Try to find "author" or "original author" in creativeTeam
+                if (d.resourceBit?.creativeTeam?.extraInfo?.creativeTeam) {
+                    try {
+                        const teamData = JSON.parse(d.resourceBit.creativeTeam.extraInfo.creativeTeam);
+                        if (teamData && teamData.creativeTeams) {
+                            const authorTeam = teamData.creativeTeams.find(m => 
+                                m.role === '作者' || m.role === '原著' || m.role === '编剧'
+                            );
+                            if (authorTeam) {
+                                author = authorTeam.nickName;
+                            }
+                            
+                            // If narrator is empty, try to find it here too
+                            if (!narrator) {
+                                const anchorTeam = teamData.creativeTeams.find(m => m.role === '主播');
+                                if (anchorTeam) {
+                                    narrator = anchorTeam.nickName;
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        Ting.log.warn('Failed to parse creativeTeam JSON: ' + e.message);
+                    }
                 }
-            } else if (mainInfo.categorys && Array.isArray(mainInfo.categorys)) {
-                 webTags = mainInfo.categorys.map(c => c.categoryName || c.name).filter(c => c);
+
+                // If author is still missing, try to extract from description
+                if (!author || author === '未知作者') {
+                    // Optimized regex to strictly match "Author: Name" pattern
+                    // Avoids matching "【Author/Narrator】" titles
+                    const authorMatch = intro.match(/(?:作者|原著|编剧)\s*[:：]\s*([^\n\r]+)/);
+                    if (authorMatch) {
+                        let rawAuthor = authorMatch[1].trim();
+                        // If line contains "主播", cut it off (e.g. "作者：AAA 主播：BBB")
+                        const anchorIdx = rawAuthor.indexOf('主播');
+                        if (anchorIdx > 0) {
+                            rawAuthor = rawAuthor.substring(0, anchorIdx);
+                        }
+                        author = rawAuthor.trim();
+                    }
+                }
+                
+                // Parse tags properly
+                let tags = [];
+                if (base.tags) {
+                    if (typeof base.tags === 'string') {
+                        tags = base.tags.split(',').filter(t => t);
+                    } else if (Array.isArray(base.tags)) {
+                        tags = base.tags;
+                    }
+                } else if (d.albumTags && Array.isArray(d.albumTags)) {
+                    // Sometimes tags are in albumTags array of objects
+                    tags = d.albumTags.map(t => t.tagName || t.name).filter(t => t);
+                } else if (d.resourceBit?.albumIntro?.body && Array.isArray(d.resourceBit.albumIntro.body)) {
+                    // Sometimes tags are in resourceBit.albumIntro.body as text items
+                    tags = d.resourceBit.albumIntro.body
+                        .filter(item => item.bizType === 'text' && item.title)
+                        .map(item => item.title);
+                }
+
+                mobileResult = {
+                    id: String(bookId),
+                    title: title,
+                    author: TextCleaner.cleanAuthor(author),
+                    narrator: narrator, 
+                    cover_url: TextCleaner.fixUrl(base.coverLarge || base.coverMiddle || base.coverSmall || base.coverPath || base.cover || base.albumCoverPath),
+                    intro: intro,
+                    tags: tags,
+                    chapter_count: base.trackCount || base.tracksInfo?.trackTotalCount || 0,
+                    duration: null
+                };
             }
-            
-            return {
-                id: String(bookId),
-                title: TextCleaner.cleanBookTitle(rawTitle),
-                author: TextCleaner.cleanAuthor(mainInfo.creatName || ''),
-                narrator: mainInfo.anchorName || null,
-                cover_url: TextCleaner.fixUrl(mainInfo.cover || mainInfo.coverMiddle || mainInfo.coverSmall),
-                intro: TextCleaner.cleanDescription(desc),
-                tags: webTags,
-                chapter_count: mainInfo.tracksInfo ? mainInfo.tracksInfo.trackTotalCount : 0,
-                duration: null
-            };
-        } catch (error) {
-            throw parseApiError(error, 'getDetail');
+        } catch (e) {
+            Ting.log.warn(`Mobile API failed: ${e.message}, trying Web API...`);
         }
+
+        // If Mobile API succeeded, return it.
+        if (mobileResult) {
+            return mobileResult;
+        }
+
+        // If Mobile API failed, we have no other fallback that works reliably without login/verification
+        throw new Error('无法获取书籍详情');
     }, 'getDetail');
 }
 
