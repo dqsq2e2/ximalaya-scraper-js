@@ -1,6 +1,6 @@
 {
   "name": "ximalaya-scraper-js",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "plugin_type": "scraper",
   "runtime": "javascript",
   "entry_point": "plugin.js",
@@ -25,4 +25,5 @@
     }
   ]
 }
+
 
