@@ -563,8 +563,9 @@ const TextCleaner = {
 async function search(args) {
     const query = args.query || '';
     const page = args.page || 1;
+    const narratorFilter = args.narrator;
     
-    Ting.log.info(`搜索喜马拉雅: ${query}, 页码: ${page}`);
+    Ting.log.info(`搜索喜马拉雅: ${query}, 页码: ${page}, 演播筛选: ${narratorFilter || '无'}`);
     
     return executeWithRetry(async () => {
         try {
@@ -594,7 +595,8 @@ async function search(args) {
                         author: '', // Search results only provide anchor, which is not the author
                         cover_url: TextCleaner.fixUrl(doc.cover_path),
                         intro: doc.intro,
-                        chapter_count: doc.tracks || doc.track_count || doc.trackCount || 0
+                        chapter_count: doc.tracks || doc.track_count || doc.trackCount || 0,
+                        narrator: doc.nickname || doc.anchorName || ''
                     });
                 }
             } else {
@@ -615,13 +617,37 @@ async function search(args) {
                             title: TextCleaner.cleanBookTitle(doc.albumTitle),
                             author: '', // Search results only provide anchor, which is not the author
                             cover_url: TextCleaner.fixUrl(doc.coverPath),
-                            intro: doc.intro
+                            intro: doc.intro,
+                            narrator: doc.nickname || doc.anchorName || ''
                         });
                     }
                 }
             }
             
             Ting.log.info(`搜索成功: 找到 ${items.length} 个结果`);
+            
+            // Filter by narrator if provided
+            let selectedIndex = 0;
+            if (narratorFilter && items.length > 0) {
+                const normalizedFilter = narratorFilter.trim().toLowerCase();
+                const index = items.findIndex(item => {
+                    const narrator = (item.narrator || '').trim().toLowerCase();
+                    return narrator && (narrator.includes(normalizedFilter) || normalizedFilter.includes(narrator));
+                });
+                
+                if (index !== -1) {
+                    Ting.log.info(`找到匹配演播的结果: ${items[index].narrator} (索引: ${index})`);
+                    selectedIndex = index;
+                    // Move selected item to top or just pick it for detail fetching?
+                    // The system usually takes the first item from the list for scraping details if it just requested search.
+                    // But here we are returning a search result list.
+                    // If we want the system to pick this one, we should probably put it first.
+                    const selectedItem = items.splice(index, 1)[0];
+                    items.unshift(selectedItem);
+                } else {
+                    Ting.log.info(`未找到匹配演播 "${narratorFilter}" 的结果，使用默认第一个`);
+                }
+            }
             
             // Enhance the first item with details (since scraping usually picks the first one)
             // System scraper relies on search result containing full metadata.
@@ -639,7 +665,7 @@ async function search(args) {
                         intro: detail.intro || items[0].intro,
                         cover_url: detail.cover_url || items[0].cover_url,
                         // Add extra fields required by system
-                        narrator: detail.narrator,
+                        narrator: detail.narrator || items[0].narrator,
                         tags: detail.tags,
                         chapter_count: detail.chapter_count > 0 ? detail.chapter_count : items[0].chapter_count
                     };
