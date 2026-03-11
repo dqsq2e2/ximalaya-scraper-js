@@ -1,12 +1,14 @@
 {
-  "name": "ximalaya-scraper-js",
-  "version": "1.0.2",
+  "id": "ximalaya-scraper-js",
+  "name": "ximalaya scraper",
+  "version": "1.0.0",
   "plugin_type": "scraper",
   "runtime": "javascript",
   "entry_point": "plugin.js",
   "author": "Ting Reader Team",
-  "description": "喜马拉雅刮削插件",
+  "description": "喜马拉雅刮削插件（JavaScript 实现）",
   "license": "MIT",
+  "homepage": "https://github.com/dqsq2e2/ximalaya-scraper-js",
   "npm_dependencies": [
     {
       "name": "axios",
@@ -25,5 +27,3 @@
     }
   ]
 }
-
-
