@@ -9,12 +9,6 @@
   "description": "喜马拉雅刮削插件（JavaScript 实现）",
   "license": "MIT",
   "homepage": "https://github.com/dqsq2e2/ximalaya-scraper-js",
-  "npm_dependencies": [
-    {
-      "name": "axios",
-      "version": "^1.6.0"
-    }
-  ],
   "dependencies": [],
   "permissions": [
     {
