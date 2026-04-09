@@ -1,6 +1,6 @@
 {
   "name": "ximalaya-scraper-js",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "喜马拉雅刮削插件 (JavaScript 版本) - 使用 axios 绕过反爬虫检测",
   "main": "plugin.js",
   "scripts": {
